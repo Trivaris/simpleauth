@@ -4,19 +4,16 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
-    dream2nix.url = "github:nix-community/dream2nix";
   };
 
-  outputs = { nixpkgs, flake-utils, ... }:
-  let 
-    inherit (flake-utils.lib) eachDefaultSystem;
-  in
-  eachDefaultSystem (system:
-    let
-      pkgs = import nixpkgs { inherit system; };
-    in
-    {
-      devShells.default = pkgs.mkShell {
+  outputs = { self, nixpkgs, flake-utils, ... }:
+  let
+    eachSystem = nixpkgs.lib.genAttrs flake-utils.lib.defaultSystems;
+  in {
+    devShells = eachSystem (system:
+    let pkgs = import nixpkgs { inherit system; };
+    in {
+      default = pkgs.mkShell {
         packages = builtins.attrValues {
           inherit (pkgs)
             nodejs_20
@@ -28,11 +25,31 @@
             ;
         };
       };
+    });
 
-      packages.default = pkgs.writeTextFile {
-        name = "placeholder";
-        text = "Build with dream2nix after init";
-      };
-    }
-  );
+    packages = eachSystem (system:
+    let
+      pkgs = import nixpkgs { inherit system; };
+    in {
+      default = import ./default.nix pkgs;
+    });
+
+    apps = eachSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        runner = pkgs.writeShellScriptBin "simpleauth" ''
+          set -euo pipefail
+          export NODE_ENV=production
+          : ''${HOST:=0.0.0.0}
+          : ''${PORT:=3000}
+          exec ${pkgs.nodejs_20}/bin/node ${self.packages.${system}.default}/index.js
+        '';
+      in {
+        default = {
+          type = "app";
+          program = "${runner}/bin/simpleauth";
+        };
+      }
+    );
+  };
 }
